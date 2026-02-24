@@ -243,6 +243,18 @@
             'República Dominicana': '🇩🇴', 'Cuba': '🇨🇺', 'Puerto Rico': '🇵🇷', 'España': '🇪🇸'
         };
 
+        // Bug fix: lookup normalizado (sin acentos, case-insensitive)
+        function getFlag(countryName) {
+            if (!countryName) return '🌍';
+            if (FLAGS[countryName]) return FLAGS[countryName];
+            const normalize = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            const target = normalize(countryName);
+            for (const [key, emoji] of Object.entries(FLAGS)) {
+                if (normalize(key) === target) return emoji;
+            }
+            return '🌍';
+        }
+
         async function cargarDatos() {
             try {
                 const periodo = document.getElementById('periodoSelect').value;
@@ -375,45 +387,86 @@
                 return;
             }
 
-            container.innerHTML = data.slice(0, 5).map(pais => `
+            container.innerHTML = data.slice(0, 5).map(pais => {
+                // Bug fix: calcular porcentaje desde pagos/conversaciones si el campo SQL viene null/0
+                const conversion = (pais.porcentaje_conversion != null && pais.porcentaje_conversion > 0)
+                    ? parseFloat(pais.porcentaje_conversion).toFixed(1)
+                    : (pais.pagos > 0 && pais.conversaciones > 0
+                        ? ((pais.pagos / pais.conversaciones) * 100).toFixed(1)
+                        : '0');
+                return `
                 <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-3">
-                        <span class="text-2xl">${FLAGS[pais.pais] || '🌍'}</span>
+                        <span class="text-2xl">${getFlag(pais.pais)}</span>
                         <div>
                             <p class="text-sm font-medium text-gray-900">${pais.pais}</p>
                             <p class="text-xs text-gray-500">${pais.conversaciones} conversaciones</p>
                         </div>
                     </div>
-                    <span class="text-sm font-semibold text-califica-red">${pais.porcentaje_conversion || 0}%</span>
+                    <span class="text-sm font-semibold text-califica-red">${conversion}%</span>
                 </div>
-            `).join('');
+            `}).join('');
         }
 
         async function cargarHeatmap(periodo) {
-            const { data, error } = await supabase.rpc('get_dashboard_actividad_por_hora', { dias: parseInt(periodo) });
-            
+            const container = document.getElementById('heatmapContainer');
+
+            // Bug fix: se reemplaza la llamada RPC (que tenía un CASE WHEN incompleto para 20-24h)
+            // por una consulta directa + cálculo de rangos horarios en JS con timezone Perú (UTC-5).
+            const desde = new Date();
+            desde.setDate(desde.getDate() - parseInt(periodo));
+
+            const { data, error } = await supabase
+                .from('bot_analytics_log')
+                .select('created_at, conversation_id')
+                .eq('event_name', 'workflow_started')
+                .gte('created_at', desde.toISOString());
+
             if (error) throw error;
 
-            const container = document.getElementById('heatmapContainer');
-            
             if (!data || data.length === 0) {
                 container.innerHTML = '<p class="text-sm text-gray-500 text-center">No hay datos</p>';
                 return;
             }
 
-            // Agrupar datos
-            const heatmapData = {};
             const dias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-            
+            const rangos = ['00-08h', '08-14h', '14-20h', '20-24h'];
+
+            // Agrupar conversaciones únicas por celda [día x rango] en horario Perú (UTC-5)
+            const celdas = {};
             data.forEach(row => {
-                const dia = dias[row.dia_semana === 0 ? 6 : row.dia_semana - 1];
-                if (!heatmapData[dia]) heatmapData[dia] = {};
-                heatmapData[dia][row.rango_horario] = row.conversaciones;
+                // Convertir UTC → Perú restando 5 horas y usando métodos UTC para evitar
+                // dependencia del timezone del navegador del cliente.
+                const utcMs = new Date(row.created_at).getTime();
+                const peruDate = new Date(utcMs - 5 * 60 * 60 * 1000);
+                const peruHour = peruDate.getUTCHours();
+                const peruDow  = peruDate.getUTCDay(); // 0=Dom, 1=Lun ... 6=Sáb
+
+                const diaLabel = dias[peruDow === 0 ? 6 : peruDow - 1];
+
+                let rango;
+                if (peruHour < 8)       rango = '00-08h';
+                else if (peruHour < 14) rango = '08-14h';
+                else if (peruHour < 20) rango = '14-20h';
+                else                    rango = '20-24h';
+
+                const key = `${diaLabel}|${rango}`;
+                if (!celdas[key]) celdas[key] = new Set();
+                celdas[key].add(row.conversation_id);
             });
 
-            // Renderizar tabla
-            const maxVal = Math.max(...data.map(d => d.conversaciones));
-            
+            // Construir heatmapData con conteo de conversaciones únicas
+            const heatmapData = {};
+            Object.entries(celdas).forEach(([key, convSet]) => {
+                const [dia, rango] = key.split('|');
+                if (!heatmapData[dia]) heatmapData[dia] = {};
+                heatmapData[dia][rango] = convSet.size;
+            });
+
+            // Calcular máximo para intensidad visual
+            const allVals = dias.flatMap(d => rangos.map(r => (heatmapData[d] || {})[r] || 0));
+            const maxVal = Math.max(...allVals, 1);
+
             container.innerHTML = `
                 <table class="w-full text-xs">
                     <thead>
@@ -437,14 +490,14 @@
                             return `
                                 <tr>
                                     <td class="text-gray-600 py-2">${dia}</td>
-                                    ${['00-08h', '08-14h', '14-20h', '20-24h'].map(rango => {
+                                    ${rangos.map(rango => {
                                         const val = diaData[rango] || 0;
-                                        const intensity = maxVal > 0 ? (val / maxVal) : 0;
+                                        const intensity = val / maxVal;
                                         const opacity = Math.max(0.2, intensity);
                                         const isHigh = intensity > 0.7;
                                         return `
                                             <td class="px-2">
-                                                <div class="h-8 rounded flex items-center justify-center ${isHigh ? 'bg-califica-navy text-white font-medium' : 'bg-califica-navy text-gray-700'}" 
+                                                <div class="h-8 rounded flex items-center justify-center ${isHigh ? 'bg-califica-navy text-white font-medium' : 'bg-califica-navy text-gray-700'}"
                                                      style="opacity: ${opacity}">
                                                     ${val}
                                                 </div>
@@ -457,7 +510,7 @@
                     </tbody>
                 </table>
                 <p class="text-xs text-gray-500 mt-4">
-                    💡 Pico de actividad: 14-20h (horario de atención con humanos) • 
+                    💡 Pico de actividad: 14-20h (horario de atención con humanos) •
                     <span class="text-califica-red font-medium">Mayor tasa de conversión en horario con soporte humano</span>
                 </p>
             `;
@@ -538,7 +591,7 @@
 
             tbody.innerHTML = data.map(pais => `
                 <tr class="hover:bg-gray-50">
-                    <td class="py-3 px-4 text-sm text-gray-900 font-medium">${FLAGS[pais.pais] || '🌍'} ${pais.pais}</td>
+                    <td class="py-3 px-4 text-sm text-gray-900 font-medium">${getFlag(pais.pais)} ${pais.pais}</td>
                     <td class="py-3 px-4 text-sm text-center">
                         <span class="bg-califica-navy/10 text-califica-navy px-3 py-1 rounded-full font-medium">${pais.total_pagos}</span>
                     </td>

@@ -152,32 +152,26 @@
             <!-- Top Países -->
             <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
                 <h2 class="text-lg font-semibold text-gray-900 mb-4">Top Países</h2>
-                <div id="topPaises" class="space-y-4">
-                    <div class="loading text-center text-gray-500">Cargando...</div>
+                <div class="flex gap-3 items-start">
+                    <div id="topPaises" class="flex-1 space-y-3 min-w-0">
+                        <div class="loading text-center text-gray-500">Cargando...</div>
+                    </div>
+                    <div class="w-28 flex-shrink-0">
+                        <canvas id="chartPaises" width="112" height="112"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Heatmap + Derivaciones -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            <!-- Heatmap -->
-            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                <h2 class="text-lg font-semibold text-gray-900 mb-1">Actividad por Horario</h2>
-                <p class="text-xs text-gray-500 mb-4">Zona horaria: Perú (UTC-5) • Horario de atención humana: 8:00 - 20:00 hrs</p>
-                <div id="heatmapContainer" class="overflow-x-auto">
-                    <div class="loading text-center text-gray-500">Cargando...</div>
-                </div>
+        <!-- Heatmap (full width) -->
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 mb-8">
+            <div class="flex items-center justify-between mb-1">
+                <h2 class="text-lg font-semibold text-gray-900">Actividad por Horario</h2>
+                <span id="heatmapRango" class="text-xs text-gray-400"></span>
             </div>
-
-            <!-- Derivaciones -->
-            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                <h2 class="text-lg font-semibold text-gray-900 mb-4">Análisis de Derivaciones</h2>
-                <div class="flex items-center justify-center mb-6">
-                    <canvas id="chartDerivaciones" width="200" height="200"></canvas>
-                </div>
-                <div id="derivacionesDetalle" class="space-y-3">
-                    <div class="loading text-center text-gray-500">Cargando...</div>
-                </div>
+            <p class="text-xs text-gray-500 mb-4">Zona horaria: Perú (UTC-5) • Horario de atención humana: 8:00 - 20:00 hrs</p>
+            <div id="heatmapContainer" class="overflow-x-auto">
+                <div class="loading text-center text-gray-500">Cargando...</div>
             </div>
         </div>
 
@@ -212,6 +206,17 @@
             </p>
         </div>
 
+        <!-- Derivaciones (compacto, al final) -->
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 mt-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Análisis de Derivaciones</h2>
+            <div class="flex items-center gap-8">
+                <canvas id="chartDerivaciones" width="140" height="140" class="flex-shrink-0"></canvas>
+                <div id="derivacionesDetalle" class="flex-1 space-y-3">
+                    <div class="loading text-center text-gray-500">Cargando...</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Footer -->
         <div id="ultimaActualizacion" class="mt-8 text-center text-sm text-gray-500">
             Última actualización: Cargando...
@@ -233,6 +238,9 @@
         
         let chartActividad = null;
         let chartDerivaciones = null;
+        let chartPaises = null;
+
+        const PAIS_COLORS = ['#FF6768', '#2F4060', '#48BB78', '#ED8936', '#3B82F6', '#9CA3AF'];
 
         // Mapeo de país → código ISO para imágenes de bandera (funciona en todos los SO/navegadores)
         const COUNTRY_CODES = {
@@ -379,7 +387,7 @@
 
         async function cargarTopPaises(periodo) {
             const { data, error } = await supabase.rpc('get_dashboard_top_paises', { dias: parseInt(periodo) });
-            
+
             if (error) throw error;
 
             const container = document.getElementById('topPaises');
@@ -389,25 +397,60 @@
                 return;
             }
 
-            container.innerHTML = data.slice(0, 5).map(pais => {
-                // Bug fix: calcular porcentaje desde pagos/conversaciones si el campo SQL viene null/0
-                const conversion = (pais.porcentaje_conversion != null && pais.porcentaje_conversion > 0)
-                    ? parseFloat(pais.porcentaje_conversion).toFixed(1)
-                    : (pais.pagos > 0 && pais.conversaciones > 0
-                        ? ((pais.pagos / pais.conversaciones) * 100).toFixed(1)
-                        : '0');
-                return `
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-3">
-                        <span class="flex-shrink-0">${getFlag(pais.pais)}</span>
-                        <div>
-                            <p class="text-sm font-medium text-gray-900">${pais.pais}</p>
-                            <p class="text-xs text-gray-500">${pais.conversaciones} conversaciones</p>
-                        </div>
+            const top5 = data.slice(0, 5);
+            const otrosTotal = data.slice(5).reduce((sum, p) => sum + p.conversaciones, 0);
+
+            // Lista de países con color indicador y bandera
+            container.innerHTML = top5.map((pais, i) => `
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${PAIS_COLORS[i]}"></div>
+                    <span class="flex-shrink-0">${getFlag(pais.pais)}</span>
+                    <div class="min-w-0 flex-1">
+                        <p class="text-sm font-medium text-gray-900 truncate">${pais.pais}</p>
+                        <p class="text-xs text-gray-500">${pais.conversaciones} convs</p>
                     </div>
-                    <span class="text-sm font-semibold text-califica-red">${conversion}%</span>
                 </div>
-            `}).join('');
+            `).join('') + (otrosTotal > 0 ? `
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${PAIS_COLORS[5]}"></div>
+                    <div class="min-w-0 flex-1">
+                        <p class="text-sm font-medium text-gray-500">Otros</p>
+                        <p class="text-xs text-gray-400">${otrosTotal} convs</p>
+                    </div>
+                </div>
+            ` : '');
+
+            // Gráfico torta de distribución de conversaciones
+            const chartLabels = [...top5.map(p => p.pais), ...(otrosTotal > 0 ? ['Otros'] : [])];
+            const chartValues = [...top5.map(p => p.conversaciones), ...(otrosTotal > 0 ? [otrosTotal] : [])];
+
+            if (chartPaises) chartPaises.destroy();
+            const ctx = document.getElementById('chartPaises').getContext('2d');
+            chartPaises = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: chartLabels,
+                    datasets: [{
+                        data: chartValues,
+                        backgroundColor: PAIS_COLORS.slice(0, chartValues.length),
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => ` ${ctx.label}: ${ctx.parsed} convs`
+                            }
+                        }
+                    },
+                    cutout: '60%'
+                }
+            });
         }
 
         async function cargarHeatmap(periodo) {
@@ -422,10 +465,13 @@
                 return;
             }
 
-            // DEBUG temporal: ver qué rangos devuelve el RPC
-            const rangosEnRPC = [...new Set(data.map(r => r.rango_horario))].sort();
-            console.log('Rangos en RPC:', rangosEnRPC);
-            console.log('Filas con rango_horario null:', data.filter(r => !r.rango_horario).length);
+            // Mostrar rango de fechas del período
+            const hasta = new Date();
+            const desde = new Date();
+            desde.setDate(desde.getDate() - parseInt(periodo));
+            const fmtOpts = { day: 'numeric', month: 'short' };
+            const rangoEl = document.getElementById('heatmapRango');
+            if (rangoEl) rangoEl.textContent = `${desde.toLocaleDateString('es-PE', fmtOpts)} – ${hasta.toLocaleDateString('es-PE', fmtOpts)}`;
 
             const dias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
             const rangos = ['00-08h', '08-14h', '14-20h', '20-24h'];

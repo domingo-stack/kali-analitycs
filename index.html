@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Kali - Analytics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/supabase.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'califica-red': '#FF6768',
+                        'califica-red-light': '#FF9899',
+                        'califica-navy': '#2F4060',
+                        'califica-navy-light': '#475573',
+                        'califica-bg': '#FBFBFB',
+                        'califica-green': '#48BB78',
+                        'califica-orange': '#ED8936',
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .loading {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+    </style>
+</head>
+<body class="bg-califica-bg">
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div class="bg-califica-red w-10 h-10 rounded-lg flex items-center justify-center">
+                        <span class="text-white font-bold text-xl">K</span>
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-900">Dashboard de Atención</h1>
+                        <p class="text-sm text-gray-500">Monitorea el rendimiento de Kali en tiempo real</p>
+                    </div>
+                </div>
+                
+                <!-- Filtro de Fecha -->
+                <div class="flex items-center space-x-3">
+                    <label class="text-sm font-medium text-gray-700">Período:</label>
+                    <select id="periodoSelect" class="border border-gray-300 rounded-lg px-4 py-2 bg-white text-sm focus:ring-2 focus:ring-califica-red focus:border-transparent">
+                        <option value="7">Últimos 7 días</option>
+                        <option value="30">Últimos 30 días</option>
+                        <option value="90">Últimos 90 días</option>
+                    </select>
+                    <button onclick="cargarDatos()" class="bg-califica-red hover:bg-califica-red-light text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                        Actualizar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <!-- KPIs Principales -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <!-- Conversaciones -->
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-600">Conversaciones</span>
+                    <div class="bg-blue-100 p-2 rounded-lg">
+                        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div class="flex items-baseline">
+                    <span id="kpi-conversaciones" class="text-3xl font-bold text-gray-900 loading">-</span>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">Total de conversaciones</p>
+            </div>
+
+            <!-- Pagos -->
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-600">Pagos Detectados</span>
+                    <div class="bg-green-100 p-2 rounded-lg">
+                        <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div class="flex items-baseline">
+                    <span id="kpi-pagos" class="text-3xl font-bold text-gray-900 loading">-</span>
+                </div>
+                <p id="kpi-pagos-detalle" class="text-xs text-gray-500 mt-1">Cargando...</p>
+            </div>
+
+            <!-- Derivaciones -->
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-600">Derivaciones</span>
+                    <div class="bg-orange-100 p-2 rounded-lg">
+                        <svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div class="flex items-baseline">
+                    <span id="kpi-derivaciones" class="text-3xl font-bold text-gray-900 loading">-</span>
+                </div>
+                <p id="kpi-derivaciones-detalle" class="text-xs text-gray-500 mt-1">Cargando...</p>
+            </div>
+
+            <!-- Tasa de Éxito -->
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-600">Tasa de Éxito</span>
+                    <div class="bg-califica-red/20 p-2 rounded-lg">
+                        <svg class="w-5 h-5 text-califica-red" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div class="flex items-baseline">
+                    <span id="kpi-exito" class="text-3xl font-bold text-gray-900 loading">-</span>
+                    <span class="text-2xl font-bold text-gray-900">%</span>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">Resoluciones sin humano</p>
+            </div>
+        </div>
+
+        <!-- Gráfico Principal + Top Países -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <!-- Gráfico de Actividad -->
+            <div class="lg:col-span-2 bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-lg font-semibold text-gray-900">Actividad Diaria</h2>
+                </div>
+                <canvas id="chartActividad" height="80"></canvas>
+            </div>
+
+            <!-- Top Países -->
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">Top Países</h2>
+                <div id="topPaises" class="space-y-4">
+                    <div class="loading text-center text-gray-500">Cargando...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Heatmap + Derivaciones -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- Heatmap -->
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <h2 class="text-lg font-semibold text-gray-900 mb-1">Actividad por Horario</h2>
+                <p class="text-xs text-gray-500 mb-4">Zona horaria: Perú (UTC-5) • Horario de atención humana: 8:00 - 20:00 hrs</p>
+                <div id="heatmapContainer" class="overflow-x-auto">
+                    <div class="loading text-center text-gray-500">Cargando...</div>
+                </div>
+            </div>
+
+            <!-- Derivaciones -->
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">Análisis de Derivaciones</h2>
+                <div class="flex items-center justify-center mb-6">
+                    <canvas id="chartDerivaciones" width="200" height="200"></canvas>
+                </div>
+                <div id="derivacionesDetalle" class="space-y-3">
+                    <div class="loading text-center text-gray-500">Cargando...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabla de Pagos -->
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-900">Detalle de Pagos por País</h2>
+                    <p class="text-xs text-gray-500 mt-1">Distribución de pagos detectados en horario y fuera de horario</p>
+                </div>
+                <span id="totalPagosTabla" class="text-sm text-gray-500">Cargando...</span>
+            </div>
+            <div class="overflow-x-auto max-h-96 overflow-y-auto">
+                <table class="w-full">
+                    <thead class="sticky top-0 bg-white border-b-2 border-gray-200">
+                        <tr>
+                            <th class="text-left py-3 px-4 text-sm font-medium text-gray-600">País</th>
+                            <th class="text-center py-3 px-4 text-sm font-medium text-gray-600">Total Pagos</th>
+                            <th class="text-center py-3 px-4 text-sm font-medium text-gray-600">Dentro Horario</th>
+                            <th class="text-center py-3 px-4 text-sm font-medium text-gray-600">Fuera Horario</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tablaPagos" class="divide-y divide-gray-100">
+                        <tr>
+                            <td colspan="4" class="py-8 text-center text-gray-500 loading">Cargando datos...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-xs text-gray-500 mt-4">
+                💡 Solo se muestran países con al menos 1 pago detectado
+            </p>
+        </div>
+
+        <!-- Footer -->
+        <div id="ultimaActualizacion" class="mt-8 text-center text-sm text-gray-500">
+            Última actualización: Cargando...
+        </div>
+    </main>
+
+    <script>
+        // ============================================
+        // 🔧 CONFIGURACIÓN - REEMPLAZA ESTOS VALORES
+        // ============================================
+        
+        const SUPABASE_URL = 'https://xaiotlzyiqhgycxvwxrk.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhhaW90bHp5aXFoZ3ljeHZ3eHJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc2MzAxMTksImV4cCI6MjA3MzIwNjExOX0.JOZEF-zzx4W0vfzBXqrH0ql1rA15-tZ6CJxZPRuA0DQ';             
+        // ============================================
+        // ⚠️ NO MODIFIQUES NADA DEBAJO DE ESTA LÍNEA
+        // ============================================
+
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        
+        let chartActividad = null;
+        let chartDerivaciones = null;
+
+        // Mapeo de banderas
+        const FLAGS = {
+            'Perú': '🇵🇪', 'Chile': '🇨🇱', 'Colombia': '🇨🇴', 'México': '🇲🇽',
+            'Venezuela': '🇻🇪', 'Nicaragua': '🇳🇮', 'Bolivia': '🇧🇴', 'Paraguay': '🇵🇾',
+            'El Salvador': '🇸🇻', 'Argentina': '🇦🇷', 'Ecuador': '🇪🇨', 'Uruguay': '🇺🇾',
+            'Costa Rica': '🇨🇷', 'Panamá': '🇵🇦', 'Guatemala': '🇬🇹', 'Honduras': '🇭🇳',
+            'República Dominicana': '🇩🇴', 'Cuba': '🇨🇺', 'Puerto Rico': '🇵🇷', 'España': '🇪🇸'
+        };
+
+        async function cargarDatos() {
+            try {
+                const periodo = document.getElementById('periodoSelect').value;
+                
+                // KPIs
+                await cargarKPIs(periodo);
+                
+                // Actividad diaria
+                await cargarActividadDiaria(periodo);
+                
+                // Top países
+                await cargarTopPaises(periodo);
+                
+                // Heatmap
+                await cargarHeatmap(periodo);
+                
+                // Derivaciones
+                await cargarDerivaciones(periodo);
+                
+                // Tabla de pagos
+                await cargarTablaPagos(periodo);
+                
+                // Actualizar timestamp
+                document.getElementById('ultimaActualizacion').textContent = 
+                    `Última actualización: ${new Date().toLocaleString('es-PE')}`;
+                
+            } catch (error) {
+                console.error('Error cargando datos:', error);
+                alert('Error al cargar los datos. Verifica tu conexión a Supabase.');
+            }
+        }
+
+        async function cargarKPIs(periodo) {
+            const { data, error } = await supabase.rpc('get_dashboard_kpis', { dias: parseInt(periodo) });
+            
+            if (error) throw error;
+            if (!data || data.length === 0) {
+                console.warn('No hay datos de KPIs');
+                return;
+            }
+
+            const kpis = data[0];
+            
+            document.getElementById('kpi-conversaciones').textContent = kpis.total_conversaciones || 0;
+            document.getElementById('kpi-pagos').textContent = kpis.total_pagos || 0;
+            
+            const tasaConversion = kpis.total_conversaciones > 0 
+                ? ((kpis.total_pagos / kpis.total_conversaciones) * 100).toFixed(1)
+                : 0;
+            document.getElementById('kpi-pagos-detalle').textContent = `Tasa de conversión: ${tasaConversion}%`;
+            
+            document.getElementById('kpi-derivaciones').textContent = kpis.total_derivaciones || 0;
+            
+            const porcentajeDeriv = kpis.total_conversaciones > 0
+                ? ((kpis.total_derivaciones / kpis.total_conversaciones) * 100).toFixed(1)
+                : 0;
+            document.getElementById('kpi-derivaciones-detalle').textContent = `${porcentajeDeriv}% del total`;
+            
+            document.getElementById('kpi-exito').textContent = kpis.tasa_exito_porcentaje || 0;
+        }
+
+        async function cargarActividadDiaria(periodo) {
+            const { data, error } = await supabase.rpc('get_dashboard_actividad_diaria', { dias: parseInt(periodo) });
+            
+            if (error) throw error;
+
+            const labels = data.map(d => new Date(d.fecha).toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric' }));
+            const conversaciones = data.map(d => d.conversaciones);
+            const pagos = data.map(d => d.pagos);
+            const derivaciones = data.map(d => d.derivaciones);
+
+            const ctx = document.getElementById('chartActividad').getContext('2d');
+            
+            if (chartActividad) chartActividad.destroy();
+            
+            chartActividad = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Conversaciones',
+                            data: conversaciones,
+                            borderColor: '#3B82F6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Pagos',
+                            data: pagos,
+                            borderColor: '#48BB78',
+                            backgroundColor: 'rgba(72, 187, 120, 0.1)',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Derivaciones',
+                            data: derivaciones,
+                            borderColor: '#ED8936',
+                            backgroundColor: 'rgba(237, 137, 54, 0.1)',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        async function cargarTopPaises(periodo) {
+            const { data, error } = await supabase.rpc('get_dashboard_top_paises', { dias: parseInt(periodo) });
+            
+            if (error) throw error;
+
+            const container = document.getElementById('topPaises');
+            
+            if (!data || data.length === 0) {
+                container.innerHTML = '<p class="text-sm text-gray-500 text-center">No hay datos</p>';
+                return;
+            }
+
+            container.innerHTML = data.slice(0, 5).map(pais => `
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <span class="text-2xl">${FLAGS[pais.pais] || '🌍'}</span>
+                        <div>
+                            <p class="text-sm font-medium text-gray-900">${pais.pais}</p>
+                            <p class="text-xs text-gray-500">${pais.conversaciones} conversaciones</p>
+                        </div>
+                    </div>
+                    <span class="text-sm font-semibold text-califica-red">${pais.porcentaje_conversion || 0}%</span>
+                </div>
+            `).join('');
+        }
+
+        async function cargarHeatmap(periodo) {
+            const { data, error } = await supabase.rpc('get_dashboard_actividad_por_hora', { dias: parseInt(periodo) });
+            
+            if (error) throw error;
+
+            const container = document.getElementById('heatmapContainer');
+            
+            if (!data || data.length === 0) {
+                container.innerHTML = '<p class="text-sm text-gray-500 text-center">No hay datos</p>';
+                return;
+            }
+
+            // Agrupar datos
+            const heatmapData = {};
+            const dias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+            
+            data.forEach(row => {
+                const dia = dias[row.dia_semana === 0 ? 6 : row.dia_semana - 1];
+                if (!heatmapData[dia]) heatmapData[dia] = {};
+                heatmapData[dia][row.rango_horario] = row.conversaciones;
+            });
+
+            // Renderizar tabla
+            const maxVal = Math.max(...data.map(d => d.conversaciones));
+            
+            container.innerHTML = `
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr class="text-gray-600">
+                            <th class="text-left py-2"></th>
+                            <th class="px-2 py-2 text-xs">00-08h</th>
+                            <th class="px-2 py-2 text-xs bg-califica-red/10 rounded-t">
+                                <div>08-14h</div>
+                                <div class="text-[9px] text-califica-red font-medium">Con humanos</div>
+                            </th>
+                            <th class="px-2 py-2 text-xs bg-califica-red/10">
+                                <div>14-20h</div>
+                                <div class="text-[9px] text-califica-red font-medium">Con humanos</div>
+                            </th>
+                            <th class="px-2 py-2 text-xs">20-24h</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${dias.map(dia => {
+                            const diaData = heatmapData[dia] || {};
+                            return `
+                                <tr>
+                                    <td class="text-gray-600 py-2">${dia}</td>
+                                    ${['00-08h', '08-14h', '14-20h', '20-24h'].map(rango => {
+                                        const val = diaData[rango] || 0;
+                                        const intensity = maxVal > 0 ? (val / maxVal) : 0;
+                                        const opacity = Math.max(0.2, intensity);
+                                        const isHigh = intensity > 0.7;
+                                        return `
+                                            <td class="px-2">
+                                                <div class="h-8 rounded flex items-center justify-center ${isHigh ? 'bg-califica-navy text-white font-medium' : 'bg-califica-navy text-gray-700'}" 
+                                                     style="opacity: ${opacity}">
+                                                    ${val}
+                                                </div>
+                                            </td>
+                                        `;
+                                    }).join('')}
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+                <p class="text-xs text-gray-500 mt-4">
+                    💡 Pico de actividad: 14-20h (horario de atención con humanos) • 
+                    <span class="text-califica-red font-medium">Mayor tasa de conversión en horario con soporte humano</span>
+                </p>
+            `;
+        }
+
+        async function cargarDerivaciones(periodo) {
+            const { data, error } = await supabase.rpc('get_dashboard_derivaciones', { dias: parseInt(periodo) });
+            
+            if (error) throw error;
+            if (!data || data.length === 0) return;
+
+            const deriv = data[0];
+            const total = deriv.total || 1;
+            const dentro = deriv.dentro_horario || 0;
+            const fuera = deriv.fuera_horario || 0;
+
+            // Gráfico
+            const ctx = document.getElementById('chartDerivaciones').getContext('2d');
+            
+            if (chartDerivaciones) chartDerivaciones.destroy();
+            
+            chartDerivaciones = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Dentro de horario', 'Fuera de horario'],
+                    datasets: [{
+                        data: [dentro, fuera],
+                        backgroundColor: ['#ED8936', '#48BB78'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+
+            // Detalle
+            document.getElementById('derivacionesDetalle').innerHTML = `
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <div class="w-3 h-3 bg-orange-500 rounded-full"></div>
+                        <span class="text-sm text-gray-700">Dentro de horario</span>
+                    </div>
+                    <span class="text-sm font-semibold text-gray-900">${dentro} (${((dentro/total)*100).toFixed(0)}%)</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <div class="w-3 h-3 bg-green-500 rounded-full"></div>
+                        <span class="text-sm text-gray-700">Fuera de horario</span>
+                    </div>
+                    <span class="text-sm font-semibold text-gray-900">${fuera} (${((fuera/total)*100).toFixed(0)}%)</span>
+                </div>
+            `;
+        }
+
+        async function cargarTablaPagos(periodo) {
+            const { data, error } = await supabase.rpc('get_dashboard_pagos_por_pais', { dias: parseInt(periodo) });
+            
+            if (error) throw error;
+
+            const tbody = document.getElementById('tablaPagos');
+            const totalSpan = document.getElementById('totalPagosTabla');
+            
+            if (!data || data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-gray-500">No hay pagos en este período</td></tr>';
+                totalSpan.textContent = 'Total: 0 pagos';
+                return;
+            }
+
+            const totalPagos = data.reduce((sum, p) => sum + p.total_pagos, 0);
+            totalSpan.textContent = `Total: ${totalPagos} pagos`;
+
+            tbody.innerHTML = data.map(pais => `
+                <tr class="hover:bg-gray-50">
+                    <td class="py-3 px-4 text-sm text-gray-900 font-medium">${FLAGS[pais.pais] || '🌍'} ${pais.pais}</td>
+                    <td class="py-3 px-4 text-sm text-center">
+                        <span class="bg-califica-navy/10 text-califica-navy px-3 py-1 rounded-full font-medium">${pais.total_pagos}</span>
+                    </td>
+                    <td class="py-3 px-4 text-sm text-center text-green-600 font-medium">${pais.dentro_horario}</td>
+                    <td class="py-3 px-4 text-sm text-center text-orange-600 font-medium">${pais.fuera_horario}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Cargar datos al inicio
+        window.addEventListener('load', cargarDatos);
+    </script>
+</body>
+</html>

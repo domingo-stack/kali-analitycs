@@ -387,11 +387,6 @@
                 return;
             }
 
-            // DEBUG: ver campos reales del RPC
-            console.log('=== TOP PAÍSES RPC ===');
-            console.log('Campos disponibles:', Object.keys(data[0]));
-            console.log('Primera fila completa:', JSON.stringify(data[0]));
-
             container.innerHTML = data.slice(0, 5).map(pais => {
                 // Bug fix: calcular porcentaje desde pagos/conversaciones si el campo SQL viene null/0
                 const conversion = (pais.porcentaje_conversion != null && pais.porcentaje_conversion > 0)
@@ -585,13 +580,6 @@
 
             const tbody = document.getElementById('tablaPagos');
             const totalSpan = document.getElementById('totalPagosTabla');
-
-            // DEBUG: ver campos reales del RPC
-            if (data && data.length > 0) {
-                console.log('=== TABLA PAGOS RPC ===');
-                console.log('Campos disponibles:', Object.keys(data[0]));
-                console.log('Primera fila completa:', JSON.stringify(data[0]));
-            }
 
             if (!data || data.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-gray-500">No hay pagos en este período</td></tr>';

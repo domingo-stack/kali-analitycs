@@ -234,24 +234,26 @@
         let chartActividad = null;
         let chartDerivaciones = null;
 
-        // Mapeo de banderas
-        const FLAGS = {
-            'Perú': '🇵🇪', 'Chile': '🇨🇱', 'Colombia': '🇨🇴', 'México': '🇲🇽',
-            'Venezuela': '🇻🇪', 'Nicaragua': '🇳🇮', 'Bolivia': '🇧🇴', 'Paraguay': '🇵🇾',
-            'El Salvador': '🇸🇻', 'Argentina': '🇦🇷', 'Ecuador': '🇪🇨', 'Uruguay': '🇺🇾',
-            'Costa Rica': '🇨🇷', 'Panamá': '🇵🇦', 'Guatemala': '🇬🇹', 'Honduras': '🇭🇳',
-            'República Dominicana': '🇩🇴', 'Cuba': '🇨🇺', 'Puerto Rico': '🇵🇷', 'España': '🇪🇸'
+        // Mapeo de país → código ISO para imágenes de bandera (funciona en todos los SO/navegadores)
+        const COUNTRY_CODES = {
+            'Perú': 'pe', 'Chile': 'cl', 'Colombia': 'co', 'México': 'mx',
+            'Venezuela': 've', 'Nicaragua': 'ni', 'Bolivia': 'bo', 'Paraguay': 'py',
+            'El Salvador': 'sv', 'Argentina': 'ar', 'Ecuador': 'ec', 'Uruguay': 'uy',
+            'Costa Rica': 'cr', 'Panamá': 'pa', 'Guatemala': 'gt', 'Honduras': 'hn',
+            'República Dominicana': 'do', 'Cuba': 'cu', 'Puerto Rico': 'pr', 'España': 'es'
         };
 
-        // Bug fix: lookup normalizado (sin acentos, case-insensitive)
         function getFlag(countryName) {
-            if (!countryName) return '🌍';
-            if (FLAGS[countryName]) return FLAGS[countryName];
+            if (!countryName) return '';
             const normalize = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-            const target = normalize(countryName);
-            for (const [key, emoji] of Object.entries(FLAGS)) {
-                if (normalize(key) === target) return emoji;
+            let code = COUNTRY_CODES[countryName];
+            if (!code) {
+                const target = normalize(countryName);
+                for (const [key, val] of Object.entries(COUNTRY_CODES)) {
+                    if (normalize(key) === target) { code = val; break; }
+                }
             }
+            if (code) return `<img src="https://flagcdn.com/24x18/${code}.png" alt="${countryName}" style="width:24px;height:18px;display:inline-block;vertical-align:middle;border-radius:2px;">`;
             return '🌍';
         }
 
@@ -397,7 +399,7 @@
                 return `
                 <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-3">
-                        <span class="text-2xl">${getFlag(pais.pais)}</span>
+                        <span class="flex-shrink-0">${getFlag(pais.pais)}</span>
                         <div>
                             <p class="text-sm font-medium text-gray-900">${pais.pais}</p>
                             <p class="text-xs text-gray-500">${pais.conversaciones} conversaciones</p>
@@ -409,62 +411,33 @@
         }
 
         async function cargarHeatmap(periodo) {
-            const container = document.getElementById('heatmapContainer');
-
-            // Bug fix: se reemplaza la llamada RPC (que tenía un CASE WHEN incompleto para 20-24h)
-            // por una consulta directa + cálculo de rangos horarios en JS con timezone Perú (UTC-5).
-            const desde = new Date();
-            desde.setDate(desde.getDate() - parseInt(periodo));
-
-            const { data, error } = await supabase
-                .from('bot_analytics_log')
-                .select('created_at, conversation_id')
-                .eq('event_name', 'workflow_started')
-                .gte('created_at', desde.toISOString())
-                .limit(50000);
+            const { data, error } = await supabase.rpc('get_dashboard_actividad_por_hora', { dias: parseInt(periodo) });
 
             if (error) throw error;
+
+            const container = document.getElementById('heatmapContainer');
 
             if (!data || data.length === 0) {
                 container.innerHTML = '<p class="text-sm text-gray-500 text-center">No hay datos</p>';
                 return;
             }
 
+            // DEBUG temporal: ver qué rangos devuelve el RPC
+            const rangosEnRPC = [...new Set(data.map(r => r.rango_horario))].sort();
+            console.log('Rangos en RPC:', rangosEnRPC);
+            console.log('Filas con rango_horario null:', data.filter(r => !r.rango_horario).length);
+
             const dias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
             const rangos = ['00-08h', '08-14h', '14-20h', '20-24h'];
 
-            // Agrupar conversaciones únicas por celda [día x rango] en horario Perú (UTC-5)
-            const celdas = {};
-            data.forEach(row => {
-                // Convertir UTC → Perú restando 5 horas y usando métodos UTC para evitar
-                // dependencia del timezone del navegador del cliente.
-                const utcMs = new Date(row.created_at).getTime();
-                const peruDate = new Date(utcMs - 5 * 60 * 60 * 1000);
-                const peruHour = peruDate.getUTCHours();
-                const peruDow  = peruDate.getUTCDay(); // 0=Dom, 1=Lun ... 6=Sáb
-
-                const diaLabel = dias[peruDow === 0 ? 6 : peruDow - 1];
-
-                let rango;
-                if (peruHour < 8)       rango = '00-08h';
-                else if (peruHour < 14) rango = '08-14h';
-                else if (peruHour < 20) rango = '14-20h';
-                else                    rango = '20-24h';
-
-                const key = `${diaLabel}|${rango}`;
-                if (!celdas[key]) celdas[key] = new Set();
-                celdas[key].add(row.conversation_id);
-            });
-
-            // Construir heatmapData con conteo de conversaciones únicas
             const heatmapData = {};
-            Object.entries(celdas).forEach(([key, convSet]) => {
-                const [dia, rango] = key.split('|');
+            data.forEach(row => {
+                if (!row.rango_horario) return;
+                const dia = dias[row.dia_semana === 0 ? 6 : row.dia_semana - 1];
                 if (!heatmapData[dia]) heatmapData[dia] = {};
-                heatmapData[dia][rango] = convSet.size;
+                heatmapData[dia][row.rango_horario] = row.conversaciones;
             });
 
-            // Calcular máximo para intensidad visual
             const allVals = dias.flatMap(d => rangos.map(r => (heatmapData[d] || {})[r] || 0));
             const maxVal = Math.max(...allVals, 1);
 

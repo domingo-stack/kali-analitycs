@@ -53,13 +53,19 @@
                 </div>
                 
                 <!-- Filtro de Fecha -->
-                <div class="flex items-center space-x-3">
+                <div class="flex items-center gap-3 flex-wrap">
                     <label class="text-sm font-medium text-gray-700">Período:</label>
-                    <select id="periodoSelect" class="border border-gray-300 rounded-lg px-4 py-2 bg-white text-sm focus:ring-2 focus:ring-califica-red focus:border-transparent">
+                    <select id="periodoSelect" onchange="toggleCustomDates()" class="border border-gray-300 rounded-lg px-4 py-2 bg-white text-sm focus:ring-2 focus:ring-califica-red focus:border-transparent">
                         <option value="7">Últimos 7 días</option>
                         <option value="30">Últimos 30 días</option>
                         <option value="90">Últimos 90 días</option>
+                        <option value="custom">Personalizado</option>
                     </select>
+                    <div id="customDates" class="hidden flex items-center gap-2">
+                        <input type="date" id="fechaDesde" class="border border-gray-300 rounded-lg px-3 py-2 bg-white text-sm focus:ring-2 focus:ring-califica-red focus:border-transparent">
+                        <span class="text-gray-400 text-sm">→</span>
+                        <input type="date" id="fechaHasta" class="border border-gray-300 rounded-lg px-3 py-2 bg-white text-sm focus:ring-2 focus:ring-califica-red focus:border-transparent">
+                    </div>
                     <button onclick="cargarDatos()" class="bg-califica-red hover:bg-califica-red-light text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                         Actualizar
                     </button>
@@ -151,7 +157,7 @@
             <!-- Actividad por Horario -->
             <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
                 <h2 class="text-base font-semibold text-gray-900 mb-1">Actividad por Horario</h2>
-                <p class="text-xs text-gray-500 mb-3">Conversaciones por hora · Perú (UTC-5)</p>
+                <p class="text-xs text-gray-500 mb-3">Promedio de conversaciones por hora · Perú (UTC-5)</p>
                 <canvas id="chartHoras"></canvas>
                 <div id="horasStats" class="mt-3 flex flex-col gap-1.5 text-xs text-gray-500">
                     <div class="loading">Cargando...</div>
@@ -162,11 +168,13 @@
         <!-- Top Países (full width) -->
         <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 mb-8">
             <h2 class="text-lg font-semibold text-gray-900 mb-5">Top Países</h2>
-            <div class="flex flex-col lg:flex-row gap-8 items-center">
-                <div id="topPaises" class="w-full lg:w-48 flex-shrink-0 space-y-2">
-                    <div class="loading text-center text-gray-500">Cargando...</div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div class="flex items-center justify-center">
+                    <div id="topPaises" class="w-full max-w-xs space-y-2">
+                        <div class="loading text-center text-gray-500">Cargando...</div>
+                    </div>
                 </div>
-                <div class="flex-1 flex justify-center items-center">
+                <div class="flex items-center justify-center">
                     <canvas id="chartPaises" width="240" height="240"></canvas>
                 </div>
             </div>
@@ -223,6 +231,23 @@
     </main>
 
     <script>
+        // ── Helpers de filtro ──────────────────────────────────────────
+        function toggleCustomDates() {
+            const isCustom = document.getElementById('periodoSelect').value === 'custom';
+            document.getElementById('customDates').classList.toggle('hidden', !isCustom);
+        }
+
+        function buildQuery(endpoint) {
+            const periodo = document.getElementById('periodoSelect').value;
+            if (periodo === 'custom') {
+                const desde = document.getElementById('fechaDesde').value;
+                const hasta  = document.getElementById('fechaHasta').value;
+                if (!desde || !hasta) throw new Error('Selecciona fechas de inicio y fin');
+                return `${endpoint}?desde=${desde}&hasta=${hasta}`;
+            }
+            return `${endpoint}?periodo=${periodo}`;
+        }
+
         // Token de autenticación: pasa ?token=TU_TOKEN en la URL
         const TOKEN = new URLSearchParams(location.search).get('token') || '';
 
@@ -277,25 +302,12 @@
 
         async function cargarDatos() {
             try {
-                const periodo = document.getElementById('periodoSelect').value;
-                
-                // KPIs
-                await cargarKPIs(periodo);
-                
-                // Actividad diaria
-                await cargarActividadDiaria(periodo);
-                
-                // Top países
-                await cargarTopPaises(periodo);
-                
-                // Actividad por horario
-                await cargarHeatmap(periodo);
-                
-                // Derivaciones
-                await cargarDerivaciones(periodo);
-                
-                // Tabla de pagos
-                await cargarTablaPagos(periodo);
+                await cargarKPIs();
+                await cargarActividadDiaria();
+                await cargarTopPaises();
+                await cargarHeatmap();
+                await cargarDerivaciones();
+                await cargarTablaPagos();
                 
                 // Actualizar timestamp
                 document.getElementById('ultimaActualizacion').textContent = 
@@ -307,8 +319,8 @@
             }
         }
 
-        async function cargarKPIs(periodo) {
-            const data = await apiFetch(`/api/kpis?periodo=${periodo}`);
+        async function cargarKPIs() {
+            const data = await apiFetch(buildQuery('/api/kpis'));
 
             if (data && data.error) throw new Error(data.error);
             if (!data || data.length === 0) {
@@ -336,8 +348,8 @@
             document.getElementById('kpi-exito').textContent = kpis.tasa_exito_porcentaje || 0;
         }
 
-        async function cargarActividadDiaria(periodo) {
-            const data = await apiFetch(`/api/actividad-diaria?periodo=${periodo}`);
+        async function cargarActividadDiaria() {
+            const data = await apiFetch(buildQuery('/api/actividad-diaria'));
 
             if (data && data.error) throw new Error(data.error);
 
@@ -395,8 +407,8 @@
             });
         }
 
-        async function cargarTopPaises(periodo) {
-            const data = await apiFetch(`/api/top-paises?periodo=${periodo}`);
+        async function cargarTopPaises() {
+            const data = await apiFetch(buildQuery('/api/top-paises'));
 
             if (data && data.error) throw new Error(data.error);
 
@@ -464,8 +476,8 @@
             });
         }
 
-        async function cargarHeatmap(periodo) {
-            const horasData = await apiFetch(`/api/actividad-horas?periodo=${periodo}`);
+        async function cargarHeatmap() {
+            const horasData = await apiFetch(buildQuery('/api/actividad-horas'));
 
             if (horasData && horasData.error) throw new Error(horasData.error);
 
@@ -535,17 +547,17 @@
             document.getElementById('horasStats').innerHTML = `
                 <div class="flex items-center gap-1.5">
                     <div class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style="background:#FF6768"></div>
-                    <span><strong>${dentroPct}%</strong> dentro del horario 8-20h (${dentro} convs)</span>
+                    <span><strong>${dentroPct}%</strong> dentro del horario 8-20h (${dentro.toFixed(1)} convs/día)</span>
                 </div>
                 <div class="flex items-center gap-1.5">
                     <div class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style="background:#2F4060"></div>
-                    <span><strong>${fueraPct}%</strong> fuera de horario${peakHour >= 0 ? ` · pico a las ${peakHour}:00h (${peakVal} convs)` : ''}</span>
+                    <span><strong>${fueraPct}%</strong> fuera de horario${peakHour >= 0 ? ` · pico a las ${peakHour}:00h (${peakVal.toFixed(1)} convs/día)` : ''}</span>
                 </div>
             `;
         }
 
-        async function cargarDerivaciones(periodo) {
-            const data = await apiFetch(`/api/derivaciones?periodo=${periodo}`);
+        async function cargarDerivaciones() {
+            const data = await apiFetch(buildQuery('/api/derivaciones'));
 
             if (data && data.error) throw new Error(data.error);
             if (!data || data.length === 0) return;
@@ -597,8 +609,8 @@
             `;
         }
 
-        async function cargarTablaPagos(periodo) {
-            const data = await apiFetch(`/api/pagos-pais?periodo=${periodo}`);
+        async function cargarTablaPagos() {
+            const data = await apiFetch(buildQuery('/api/pagos-pais'));
 
             if (data && data.error) throw new Error(data.error);
 

@@ -1,38 +1,48 @@
 const { createClient } = require('@supabase/supabase-js');
 const auth = require('./_auth');
+const getDates = require('./_dates');
+
+const PERU_OFFSET_MS = -5 * 60 * 60 * 1000;
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
-
   if (!auth(req)) return res.status(401).json({ error: 'Unauthorized' });
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-  const periodo = parseInt(req.query.periodo) || 7;
+  const { desde, hasta } = getDates(req.query);
 
-  const desde = new Date();
-  desde.setDate(desde.getDate() - periodo);
-
-  // Service key + limit alto: sin row-limit de 1000 filas
   const { data, error } = await supabase
     .from('bot_analytics_log')
-    .select('created_at, conversation_id')
+    .select('created_at')
     .eq('event_name', 'workflow_started')
-    .gte('created_at', desde.toISOString())
-    .limit(100000);
+    .gte('created_at', desde)
+    .lte('created_at', hasta)
+    .limit(200000);
 
   if (error) return res.status(500).json({ error: error.message });
 
-  // Agregar conversaciones únicas por hora en Perú (UTC-5)
-  const hourSets = Array.from({ length: 24 }, () => new Set());
+  // Contar eventos por hora y registrar los días que tienen datos
+  const hourTotals = Array(24).fill(0);
+  const daySet = new Set();
+
   (data || []).forEach(row => {
-    const peruMs = new Date(row.created_at).getTime() - 5 * 3600 * 1000;
-    const hour = new Date(peruMs).getUTCHours();
-    hourSets[hour].add(row.conversation_id);
+    const peruTime = new Date(new Date(row.created_at).getTime() + PERU_OFFSET_MS);
+    const hour = peruTime.getUTCHours();
+    const date = peruTime.toISOString().slice(0, 10);
+    hourTotals[hour]++;
+    daySet.add(date);
   });
 
-  const result = hourSets.map((s, hora) => ({ hora, conversaciones: s.size }));
+  // Número de días en el período para calcular el promedio diario
+  const numDays = Math.max(1, daySet.size);
+
+  const result = hourTotals.map((total, hora) => ({
+    hora,
+    conversaciones: +(total / numDays).toFixed(1),
+  }));
+
   res.json(result);
 };

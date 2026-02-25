@@ -16,7 +16,7 @@ module.exports = async (req, res) => {
 
   const { data, error } = await supabase
     .from('bot_analytics_log')
-    .select('created_at')
+    .select('created_at, conversation_id')
     .eq('event_name', 'workflow_started')
     .gte('created_at', desde)
     .lte('created_at', hasta)
@@ -24,24 +24,34 @@ module.exports = async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
 
+  // Para cada conversación única, quedarnos solo con su PRIMER evento del período
+  const convFirstTs = {};
+  (data || []).forEach(row => {
+    const ts = new Date(row.created_at).getTime();
+    if (!convFirstTs[row.conversation_id] || ts < convFirstTs[row.conversation_id]) {
+      convFirstTs[row.conversation_id] = ts;
+    }
+  });
+
+  // Distribuir cada conversación en la hora de su primer evento (hora Perú)
   const hourTotals = Array(24).fill(0);
   const daySet = new Set();
 
-  (data || []).forEach(row => {
-    const peruTime = new Date(new Date(row.created_at).getTime() + PERU_OFFSET_MS);
+  Object.values(convFirstTs).forEach(ts => {
+    const peruTime = new Date(ts + PERU_OFFSET_MS);
     const hour = peruTime.getUTCHours();
     const date = peruTime.toISOString().slice(0, 10);
     hourTotals[hour]++;
     daySet.add(date);
   });
 
+  // total = suma de conversaciones únicas (debe coincidir con KPI)
+  // conversaciones = promedio diario por hora (para el gráfico)
   const numDias = Math.max(1, daySet.size);
-
-  // Devolver total Y promedio para que el frontend pueda mostrar ambos
   const result = hourTotals.map((total, hora) => ({
     hora,
-    total,                                        // total acumulado del período
-    conversaciones: +(total / numDias).toFixed(1), // promedio por día (para el gráfico)
+    total,
+    conversaciones: +(total / numDias).toFixed(1),
   }));
 
   res.json(result);

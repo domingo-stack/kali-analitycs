@@ -649,8 +649,11 @@
             document.body.style.background = 'transparent';
         }
 
-        // Cargar datos al inicio
-        window.addEventListener('load', cargarDatos);
+        // Cargar datos al inicio y auto-refresh cada 5 minutos
+        window.addEventListener('load', () => {
+            cargarDatos();
+            setInterval(cargarDatos, 5 * 60 * 1000);
+        });
     </script>
 </body>
 </html>

@@ -481,8 +481,9 @@
 
             if (horasData && horasData.error) throw new Error(horasData.error);
 
-            // El API ya agrega en Node.js (sin row-limit): [{hora:0, conversaciones:5}, ...]
-            const hourData = (horasData || []).map(d => d.conversaciones);
+            // conversaciones = promedio/día (para el gráfico), total = acumulado del período (para stats)
+            const hourData   = (horasData || []).map(d => d.conversaciones); // promedios
+            const hourTotals = (horasData || []).map(d => d.total);           // totales reales
 
             // Colores: rojo dentro del horario 8-20h, navy fuera
             const barColors = hourData.map((_, h) =>
@@ -530,28 +531,29 @@
                 }
             });
 
-            // Stats: % dentro/fuera de horario + pico fuera
-            const total = hourData.reduce((s, v) => s + v, 0) || 1;
-            const dentro = hourData.slice(8, 20).reduce((s, v) => s + v, 0);
-            const fuera = total - dentro;
-            const dentroPct = ((dentro / total) * 100).toFixed(0);
-            const fueraPct = ((fuera / total) * 100).toFixed(0);
+            // Stats: usar totales reales para que los números coincidan con KPIs
+            const totalConvs  = hourTotals.reduce((s, v) => s + v, 0) || 1;
+            const dentroConvs = hourTotals.slice(8, 20).reduce((s, v) => s + v, 0);
+            const fueraConvs  = totalConvs - dentroConvs;
+            const dentroPct   = Math.round((dentroConvs / totalConvs) * 100);
+            const fueraPct    = 100 - dentroPct;
 
+            // Pico fuera de horario (en totales)
             let peakHour = -1, peakVal = 0;
             for (let h = 0; h < 24; h++) {
-                if ((h < 8 || h >= 20) && hourData[h] > peakVal) {
-                    peakVal = hourData[h]; peakHour = h;
+                if ((h < 8 || h >= 20) && hourTotals[h] > peakVal) {
+                    peakVal = hourTotals[h]; peakHour = h;
                 }
             }
 
             document.getElementById('horasStats').innerHTML = `
                 <div class="flex items-center gap-1.5">
                     <div class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style="background:#FF6768"></div>
-                    <span><strong>${dentroPct}%</strong> dentro del horario 8-20h (${dentro.toFixed(1)} convs/día)</span>
+                    <span><strong>${dentroPct}%</strong> dentro del horario 8-20h · ${dentroConvs} convs</span>
                 </div>
                 <div class="flex items-center gap-1.5">
                     <div class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style="background:#2F4060"></div>
-                    <span><strong>${fueraPct}%</strong> fuera de horario${peakHour >= 0 ? ` · pico a las ${peakHour}:00h (${peakVal.toFixed(1)} convs/día)` : ''}</span>
+                    <span><strong>${fueraPct}%</strong> fuera de horario · ${fueraConvs} convs${peakHour >= 0 ? ` · pico ${peakHour}h` : ''}</span>
                 </div>
             `;
         }

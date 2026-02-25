@@ -24,7 +24,6 @@ module.exports = async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
 
-  // Contar eventos por hora y registrar los días que tienen datos
   const hourTotals = Array(24).fill(0);
   const daySet = new Set();
 
@@ -36,12 +35,13 @@ module.exports = async (req, res) => {
     daySet.add(date);
   });
 
-  // Número de días en el período para calcular el promedio diario
-  const numDays = Math.max(1, daySet.size);
+  const numDias = Math.max(1, daySet.size);
 
+  // Devolver total Y promedio para que el frontend pueda mostrar ambos
   const result = hourTotals.map((total, hora) => ({
     hora,
-    conversaciones: +(total / numDays).toFixed(1),
+    total,                                        // total acumulado del período
+    conversaciones: +(total / numDias).toFixed(1), // promedio por día (para el gráfico)
   }));
 
   res.json(result);

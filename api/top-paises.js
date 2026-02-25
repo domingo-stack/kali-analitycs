@@ -12,7 +12,8 @@ module.exports = async (req, res) => {
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
   const { desde, hasta } = getDates(req.query);
 
-  const { data, error } = await supabase
+  // Paso 1: todas las conversaciones del período con su country (workflow_started)
+  const { data: wfData, error: wfError } = await supabase
     .from('bot_analytics_log')
     .select('conversation_id, country')
     .eq('event_name', 'workflow_started')
@@ -20,18 +21,50 @@ module.exports = async (req, res) => {
     .lte('created_at', hasta)
     .limit(200000);
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (wfError) return res.status(500).json({ error: wfError.message });
 
-  // Agrupar por país, contar conversation_id únicos
+  // Construir mapa conversation_id → country desde workflow_started
+  const convCountry = {};
+  const allConvIds = new Set();
+  (wfData || []).forEach(row => {
+    allConvIds.add(row.conversation_id);
+    if (!convCountry[row.conversation_id] && row.country) {
+      convCountry[row.conversation_id] = row.country;
+    }
+  });
+
+  // Paso 2: para las conversaciones sin country, buscar en country_detected
+  const sinPais = [...allConvIds].filter(id => !convCountry[id]);
+  if (sinPais.length > 0) {
+    // Supabase IN tiene límite ~1000 items — lo partimos en chunks si hace falta
+    const chunks = [];
+    for (let i = 0; i < sinPais.length; i += 1000) chunks.push(sinPais.slice(i, i + 1000));
+
+    for (const chunk of chunks) {
+      const { data: cdData } = await supabase
+        .from('bot_analytics_log')
+        .select('conversation_id, country')
+        .eq('event_name', 'country_detected')
+        .in('conversation_id', chunk)
+        .limit(200000);
+
+      (cdData || []).forEach(row => {
+        if (!convCountry[row.conversation_id] && row.country) {
+          convCountry[row.conversation_id] = row.country;
+        }
+      });
+    }
+  }
+
+  // Paso 3: agrupar por país
   const paises = {};
-  (data || []).forEach(row => {
-    const pais = row.country || 'Desconocido';
-    if (!paises[pais]) paises[pais] = new Set();
-    paises[pais].add(row.conversation_id);
+  allConvIds.forEach(id => {
+    const pais = convCountry[id] || 'Desconocido';
+    paises[pais] = (paises[pais] || 0) + 1;
   });
 
   const result = Object.entries(paises)
-    .map(([pais, ids]) => ({ pais, conversaciones: ids.size }))
+    .map(([pais, conversaciones]) => ({ pais, conversaciones }))
     .sort((a, b) => b.conversaciones - a.conversaciones);
 
   res.json(result);

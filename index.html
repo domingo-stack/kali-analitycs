@@ -149,14 +149,13 @@
                 <canvas id="chartActividad" height="80"></canvas>
             </div>
 
-            <!-- Heatmap semana actual -->
+            <!-- Actividad por Horario -->
             <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                <div class="flex items-center justify-between mb-1">
-                    <h2 class="text-base font-semibold text-gray-900">Actividad por Horario</h2>
-                </div>
-                <p class="text-xs text-gray-500 mb-3">Perú (UTC-5) • <span id="heatmapRango" class="font-medium text-califica-red">Semana actual</span></p>
-                <div id="heatmapContainer" class="overflow-x-auto">
-                    <div class="loading text-center text-gray-500">Cargando...</div>
+                <h2 class="text-base font-semibold text-gray-900 mb-1">Actividad por Horario</h2>
+                <p class="text-xs text-gray-500 mb-3">Conversaciones por hora · Perú (UTC-5)</p>
+                <canvas id="chartHoras"></canvas>
+                <div id="horasStats" class="mt-3 flex flex-col gap-1.5 text-xs text-gray-500">
+                    <div class="loading">Cargando...</div>
                 </div>
             </div>
         </div>
@@ -240,6 +239,7 @@
         let chartActividad = null;
         let chartDerivaciones = null;
         let chartPaises = null;
+        let chartHoras = null;
 
         const PAIS_COLORS = ['#FF6768', '#2F4060', '#48BB78', '#ED8936', '#3B82F6', '#9CA3AF'];
 
@@ -279,8 +279,8 @@
                 // Top países
                 await cargarTopPaises(periodo);
                 
-                // Heatmap (siempre muestra semana actual, no depende del período)
-                await cargarHeatmap();
+                // Actividad por horario
+                await cargarHeatmap(periodo);
                 
                 // Derivaciones
                 await cargarDerivaciones(periodo);
@@ -455,105 +455,98 @@
             });
         }
 
-        async function cargarHeatmap() {
-            const container = document.getElementById('heatmapContainer');
+        async function cargarHeatmap(periodo) {
+            // Consulta directa: eventos del período, contamos por hora en Perú (UTC-5)
+            const desde = new Date();
+            desde.setDate(desde.getDate() - parseInt(periodo));
 
-            // Calcular inicio de semana actual en hora Perú (UTC-5), timezone-safe
-            const nowMs = Date.now();
-            const peruNow = new Date(nowMs - 5 * 3600 * 1000);
-            const peruDow = peruNow.getUTCDay(); // 0=Dom, 1=Lun ... 6=Sáb
-            const daysFromMon = peruDow === 0 ? 6 : peruDow - 1;
-            // Medianoche del lunes en Perú = lunes 00:00 Perú = lunes 05:00 UTC
-            const mondayPeruMidnightMs = nowMs
-                - 5 * 3600 * 1000                           // back to Perú
-                - daysFromMon * 86400 * 1000                // back to Monday
-                - (peruNow.getUTCHours() * 3600 + peruNow.getUTCMinutes() * 60 + peruNow.getUTCSeconds()) * 1000;
-            const weekStart = new Date(mondayPeruMidnightMs + 5 * 3600 * 1000); // convert back to UTC
-
-            // Actualizar subtítulo con fechas reales
-            const fmtOpts = { weekday: 'short', day: 'numeric', month: 'short' };
-            const rangoEl = document.getElementById('heatmapRango');
-            if (rangoEl) rangoEl.textContent =
-                `${weekStart.toLocaleDateString('es-PE', fmtOpts)} → hoy`;
-
-            // Consulta directa: todos los eventos de esta semana
             const { data, error } = await supabase
                 .from('bot_analytics_log')
                 .select('created_at, conversation_id')
-                .gte('created_at', weekStart.toISOString())
-                .limit(10000);
+                .eq('event_name', 'workflow_started')
+                .gte('created_at', desde.toISOString())
+                .limit(50000);
 
             if (error) throw error;
 
-            if (!data || data.length === 0) {
-                container.innerHTML = '<p class="text-sm text-gray-500 text-center py-4">Sin datos esta semana</p>';
-                return;
+            // Contar conversaciones únicas por hora (0-23) en hora Perú
+            const hourSets = Array.from({ length: 24 }, () => new Set());
+            (data || []).forEach(row => {
+                const peruMs = new Date(row.created_at).getTime() - 5 * 3600 * 1000;
+                const hour = new Date(peruMs).getUTCHours();
+                hourSets[hour].add(row.conversation_id);
+            });
+            const hourData = hourSets.map(s => s.size);
+
+            // Colores: rojo dentro del horario 8-20h, navy fuera
+            const barColors = hourData.map((_, h) =>
+                (h >= 8 && h < 20) ? '#FF6768' : '#2F4060'
+            );
+            const labels = Array.from({ length: 24 }, (_, h) => `${h}h`);
+
+            if (chartHoras) chartHoras.destroy();
+            const ctx = document.getElementById('chartHoras').getContext('2d');
+            chartHoras = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: hourData,
+                        backgroundColor: barColors,
+                        borderRadius: 3,
+                        borderSkipped: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: 1.6,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                title: ctx => `${ctx[0].label} hs · hora Perú`,
+                                label: ctx => ` ${ctx.parsed.y} conversaciones`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { font: { size: 9 }, maxRotation: 0 }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#f3f4f6' },
+                            ticks: { font: { size: 10 }, precision: 0 }
+                        }
+                    }
+                }
+            });
+
+            // Stats: % dentro/fuera de horario + pico fuera
+            const total = hourData.reduce((s, v) => s + v, 0) || 1;
+            const dentro = hourData.slice(8, 20).reduce((s, v) => s + v, 0);
+            const fuera = total - dentro;
+            const dentroPct = ((dentro / total) * 100).toFixed(0);
+            const fueraPct = ((fuera / total) * 100).toFixed(0);
+
+            let peakHour = -1, peakVal = 0;
+            for (let h = 0; h < 24; h++) {
+                if ((h < 8 || h >= 20) && hourData[h] > peakVal) {
+                    peakVal = hourData[h]; peakHour = h;
+                }
             }
 
-            const dias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-            const rangos = ['00-08h', '08-14h', '14-20h', '20-24h'];
-
-            // Agrupar conversaciones únicas por celda en hora Perú
-            const celdas = {};
-            data.forEach(row => {
-                const peruMs = new Date(row.created_at).getTime() - 5 * 3600 * 1000;
-                const peruDate = new Date(peruMs);
-                const hour = peruDate.getUTCHours();
-                const dow = peruDate.getUTCDay();
-                const diaLabel = dias[dow === 0 ? 6 : dow - 1];
-                const rango = hour < 8 ? '00-08h' : hour < 14 ? '08-14h' : hour < 20 ? '14-20h' : '20-24h';
-                const key = `${diaLabel}|${rango}`;
-                if (!celdas[key]) celdas[key] = new Set();
-                celdas[key].add(row.conversation_id);
-            });
-
-            const heatmapData = {};
-            Object.entries(celdas).forEach(([key, s]) => {
-                const [dia, rango] = key.split('|');
-                if (!heatmapData[dia]) heatmapData[dia] = {};
-                heatmapData[dia][rango] = s.size;
-            });
-
-            const allVals = dias.flatMap(d => rangos.map(r => (heatmapData[d] || {})[r] || 0));
-            const maxVal = Math.max(...allVals, 1);
-
-            // Solo mostrar días que ya ocurrieron esta semana (Lun → hoy)
-            const diasSemana = dias.slice(0, daysFromMon + 1);
-
-            container.innerHTML = `
-                <table class="text-xs" style="min-width:100%">
-                    <thead>
-                        <tr class="text-gray-500">
-                            <th class="text-left pr-2 py-1 font-normal w-8"></th>
-                            <th class="px-1 py-1 text-center font-normal text-[10px]">00-08h</th>
-                            <th class="px-1 py-1 text-center font-normal text-[10px] bg-califica-red/10 rounded-t">
-                                <div>08-14h</div><div class="text-[8px] text-califica-red">humanos</div>
-                            </th>
-                            <th class="px-1 py-1 text-center font-normal text-[10px] bg-califica-red/10">
-                                <div>14-20h</div><div class="text-[8px] text-califica-red">humanos</div>
-                            </th>
-                            <th class="px-1 py-1 text-center font-normal text-[10px]">20-24h</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${diasSemana.map(dia => {
-                            const diaData = heatmapData[dia] || {};
-                            return `<tr>
-                                <td class="text-gray-500 pr-2 py-0.5 font-medium">${dia}</td>
-                                ${rangos.map(rango => {
-                                    const val = diaData[rango] || 0;
-                                    const intensity = val / maxVal;
-                                    const opacity = val === 0 ? 0.08 : Math.max(0.25, intensity);
-                                    const textColor = intensity > 0.5 ? 'text-white' : 'text-gray-600';
-                                    return `<td class="px-1 py-0.5">
-                                        <div class="h-7 rounded flex items-center justify-center text-[11px] font-medium bg-califica-navy ${textColor}"
-                                             style="opacity:${opacity}">${val || ''}</div>
-                                    </td>`;
-                                }).join('')}
-                            </tr>`;
-                        }).join('')}
-                    </tbody>
-                </table>
+            document.getElementById('horasStats').innerHTML = `
+                <div class="flex items-center gap-1.5">
+                    <div class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style="background:#FF6768"></div>
+                    <span><strong>${dentroPct}%</strong> dentro del horario 8-20h (${dentro} convs)</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <div class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style="background:#2F4060"></div>
+                    <span><strong>${fueraPct}%</strong> fuera de horario${peakHour >= 0 ? ` · pico a las ${peakHour}:00h (${peakVal} convs)` : ''}</span>
+                </div>
             `;
         }
 

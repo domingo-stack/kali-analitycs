@@ -353,7 +353,8 @@
 
             if (data && data.error) throw new Error(data.error);
 
-            const labels = data.map(d => new Date(d.fecha).toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric' }));
+            // T12:00:00 evita que JavaScript parsee como UTC midnight y lo muestre como el día anterior en Perú
+            const labels = data.map(d => new Date(d.fecha + 'T12:00:00').toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric' }));
             const conversaciones = data.map(d => d.conversaciones);
             const pagos = data.map(d => d.pagos);
             const derivaciones = data.map(d => d.derivaciones);

@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard Kali - Analytics</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/supabase.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         tailwind.config = {
@@ -224,17 +223,27 @@
     </main>
 
     <script>
-        // ============================================
-        // 🔧 CONFIGURACIÓN - REEMPLAZA ESTOS VALORES
-        // ============================================
-        
-        const SUPABASE_URL = 'https://xaiotlzyiqhgycxvwxrk.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhhaW90bHp5aXFoZ3ljeHZ3eHJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc2MzAxMTksImV4cCI6MjA3MzIwNjExOX0.JOZEF-zzx4W0vfzBXqrH0ql1rA15-tZ6CJxZPRuA0DQ';            
-        // ============================================
-        // ⚠️ NO MODIFIQUES NADA DEBAJO DE ESTA LÍNEA
-        // ============================================
+        // Token de autenticación: pasa ?token=TU_TOKEN en la URL
+        const TOKEN = new URLSearchParams(location.search).get('token') || '';
 
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        // Guard: sin token, bloquear toda la UI
+        if (!TOKEN) {
+            document.body.innerHTML = `
+                <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#FBFBFB;">
+                    <div style="text-align:center;padding:2rem;">
+                        <div style="background:#FF6768;width:56px;height:56px;border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;">
+                            <span style="color:white;font-size:1.5rem;font-weight:700;">K</span>
+                        </div>
+                        <h1 style="font-size:1.25rem;font-weight:600;color:#111827;margin-bottom:0.5rem;">Acceso restringido</h1>
+                        <p style="color:#6B7280;font-size:0.875rem;">Se requiere un token válido para ver este dashboard.</p>
+                    </div>
+                </div>`;
+            throw new Error('No token');
+        }
+
+        const apiFetch = (path) => fetch(path, {
+            headers: { 'Authorization': `Bearer ${TOKEN}` }
+        }).then(r => r.json());
         
         let chartActividad = null;
         let chartDerivaciones = null;
@@ -294,14 +303,14 @@
                 
             } catch (error) {
                 console.error('Error cargando datos:', error);
-                alert('Error al cargar los datos. Verifica tu conexión a Supabase.');
+                alert('Error al cargar los datos: ' + error.message);
             }
         }
 
         async function cargarKPIs(periodo) {
-            const { data, error } = await supabase.rpc('get_dashboard_kpis', { dias: parseInt(periodo) });
-            
-            if (error) throw error;
+            const data = await apiFetch(`/api/kpis?periodo=${periodo}`);
+
+            if (data && data.error) throw new Error(data.error);
             if (!data || data.length === 0) {
                 console.warn('No hay datos de KPIs');
                 return;
@@ -328,9 +337,9 @@
         }
 
         async function cargarActividadDiaria(periodo) {
-            const { data, error } = await supabase.rpc('get_dashboard_actividad_diaria', { dias: parseInt(periodo) });
-            
-            if (error) throw error;
+            const data = await apiFetch(`/api/actividad-diaria?periodo=${periodo}`);
+
+            if (data && data.error) throw new Error(data.error);
 
             const labels = data.map(d => new Date(d.fecha).toLocaleDateString('es-PE', { weekday: 'short', day: 'numeric' }));
             const conversaciones = data.map(d => d.conversaciones);
@@ -387,9 +396,9 @@
         }
 
         async function cargarTopPaises(periodo) {
-            const { data, error } = await supabase.rpc('get_dashboard_top_paises', { dias: parseInt(periodo) });
+            const data = await apiFetch(`/api/top-paises?periodo=${periodo}`);
 
-            if (error) throw error;
+            if (data && data.error) throw new Error(data.error);
 
             const container = document.getElementById('topPaises');
 
@@ -456,27 +465,12 @@
         }
 
         async function cargarHeatmap(periodo) {
-            // Consulta directa: eventos del período, contamos por hora en Perú (UTC-5)
-            const desde = new Date();
-            desde.setDate(desde.getDate() - parseInt(periodo));
+            const horasData = await apiFetch(`/api/actividad-horas?periodo=${periodo}`);
 
-            const { data, error } = await supabase
-                .from('bot_analytics_log')
-                .select('created_at, conversation_id')
-                .eq('event_name', 'workflow_started')
-                .gte('created_at', desde.toISOString())
-                .limit(50000);
+            if (horasData && horasData.error) throw new Error(horasData.error);
 
-            if (error) throw error;
-
-            // Contar conversaciones únicas por hora (0-23) en hora Perú
-            const hourSets = Array.from({ length: 24 }, () => new Set());
-            (data || []).forEach(row => {
-                const peruMs = new Date(row.created_at).getTime() - 5 * 3600 * 1000;
-                const hour = new Date(peruMs).getUTCHours();
-                hourSets[hour].add(row.conversation_id);
-            });
-            const hourData = hourSets.map(s => s.size);
+            // El API ya agrega en Node.js (sin row-limit): [{hora:0, conversaciones:5}, ...]
+            const hourData = (horasData || []).map(d => d.conversaciones);
 
             // Colores: rojo dentro del horario 8-20h, navy fuera
             const barColors = hourData.map((_, h) =>
@@ -551,9 +545,9 @@
         }
 
         async function cargarDerivaciones(periodo) {
-            const { data, error } = await supabase.rpc('get_dashboard_derivaciones', { dias: parseInt(periodo) });
-            
-            if (error) throw error;
+            const data = await apiFetch(`/api/derivaciones?periodo=${periodo}`);
+
+            if (data && data.error) throw new Error(data.error);
             if (!data || data.length === 0) return;
 
             const deriv = data[0];
@@ -604,9 +598,9 @@
         }
 
         async function cargarTablaPagos(periodo) {
-            const { data, error } = await supabase.rpc('get_dashboard_pagos_por_pais', { dias: parseInt(periodo) });
-            
-            if (error) throw error;
+            const data = await apiFetch(`/api/pagos-pais?periodo=${periodo}`);
+
+            if (data && data.error) throw new Error(data.error);
 
             const tbody = document.getElementById('tablaPagos');
             const totalSpan = document.getElementById('totalPagosTabla');
@@ -630,6 +624,13 @@
                     <td class="py-3 px-4 text-sm text-center text-orange-600 font-medium">${pais.fuera_horario}</td>
                 </tr>
             `).join('');
+        }
+
+        // Modo embed: oculta header y quita padding exterior
+        if (new URLSearchParams(location.search).get('embed') === 'true') {
+            document.querySelector('header').style.display = 'none';
+            document.querySelector('main').classList.remove('py-8');
+            document.body.style.background = 'transparent';
         }
 
         // Cargar datos al inicio
